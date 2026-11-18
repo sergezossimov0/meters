@@ -24,6 +24,23 @@ jobs:
       - name: golangci-lint
         run: mise run lint
 
+  # The course's static analyzer (same check as the course template's
+  # statictest.yml), latest release of Yandex-Practicum/go-autotests.
+  statictest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jdx/mise-action@v4
+      - name: Download statictest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download --repo Yandex-Practicum/go-autotests --pattern statictest --dir "$RUNNER_TEMP"
+          chmod +x "$RUNNER_TEMP/statictest"
+      - name: go vet with statictest
+        run: go vet -vettool="$RUNNER_TEMP/statictest" ./...
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
