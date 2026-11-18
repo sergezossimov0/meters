@@ -1,0 +1,81 @@
+# mise config: pinned toolchain + project tasks.
+# List tasks: mise tasks        Run one: mise run build
+#
+# Secrets are NOT stored here. Put them in mise.local.toml (git-excluded):
+#   [env]
+#   POSTGRES_PASSWORD = "..."
+#   JWT_SECRET = "..."
+#   KEY = "..."
+# or export them in the shell.
+
+[tools]
+go = "1.26"
+golangci-lint = "2"
+
+[env]
+BIN_DIR   = "{{ get_env(name='BIN_DIR', default='bin') }}"
+LOG_LEVEL = "{{ get_env(name='LOG_LEVEL', default='info') }}"
+
+# ---------- build ----------
+
+[tasks.build]
+description = "Build server and gateway binaries"
+run = '''
+mkdir -p "$BIN_DIR"
+VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS="-X main.version=$VERSION"
+go build -ldflags "$LDFLAGS" -o "$BIN_DIR/server" ./cmd/server
+go build -ldflags "$LDFLAGS" -o "$BIN_DIR/gateway" ./cmd/gateway
+'''
+
+[tasks.clean]
+description = "Remove build and coverage artifacts"
+run = 'rm -rf "$BIN_DIR"/ coverage.out coverage.html'
+
+# ---------- quality ----------
+
+[tasks.deps]
+description = "Download and tidy dependencies"
+run = ["go mod download", "go mod tidy"]
+
+[tasks.fmt]
+description = "Format code (golangci-lint formatters: gofmt + goimports)"
+run = "golangci-lint fmt ./..."
+
+[tasks.lint]
+description = "Run golangci-lint"
+run = "golangci-lint run ./..."
+
+[tasks.test]
+description = "Run unit tests"
+run = "go test ./..."
+
+[tasks.test-race]
+description = "Run unit tests with the race detector"
+run = "go test -race ./..."
+
+[tasks.test-integration]
+description = "Run integration tests (needs Docker for testcontainers)"
+run = "go test -race -tags=integration ./..."
+
+[tasks.test-coverage]
+description = "Run tests with coverage report"
+run = [
+  "go test -race -coverprofile=coverage.out ./...",
+  "go tool cover -func=coverage.out | tail -1",
+  "go tool cover -html=coverage.out -o coverage.html",
+]
+
+[tasks.check]
+description = "lint + race tests + build"
+run = [{ task = "lint" }, { task = "test-race" }, { task = "build" }]
+
+# ---------- docker ----------
+
+[tasks.up]
+description = "Start PostgreSQL and server in Docker (gateways: COMPOSE_PROFILES=gateways)"
+run = "docker compose up -d --build"
+
+[tasks.down]
+description = "Stop Docker services"
+run = "docker compose down"
