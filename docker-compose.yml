@@ -1,0 +1,90 @@
+# Local stand: PostgreSQL + server; gateways join with --profile gateways
+# once their keys exist (registered by the admin in L2).
+# Values come from .env (copy .env.example and replace the placeholders).
+name: meters
+
+x-gateway: &gateway
+  build:
+    context: .
+    args:
+      APP: gateway
+      VERSION: ${VERSION:-dev}
+  image: meters-gateway:${VERSION:-dev}
+  profiles: [gateways]
+  depends_on:
+    server:
+      condition: service_started
+  restart: unless-stopped
+  stop_grace_period: 15s
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: meters
+      POSTGRES_USER: meters
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U meters -d meters"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    restart: unless-stopped
+
+  server:
+    build:
+      context: .
+      args:
+        APP: server
+        VERSION: ${VERSION:-dev}
+    image: meters-server:${VERSION:-dev}
+    environment:
+      ADDRESS: ":8080"
+      # The password is not in the DSN: pgx takes it from PGPASSWORD.
+      DATABASE_DSN: postgres://meters@postgres:5432/meters?sslmode=disable
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      KEY: ${KEY:-}
+      ADMIN_LOGIN: ${ADMIN_LOGIN:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      TIMEZONE: ${TIMEZONE:-Asia/Almaty}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    # Longer than the server's 10 s shutdown timeout, so SIGKILL never cuts it.
+    stop_grace_period: 15s
+
+  gateway-1:
+    <<: *gateway
+    environment:
+      ADDRESS: http://server:8080
+      GATEWAY_KEY: ${GATEWAY_1_KEY:-}
+      KEY: ${KEY:-}
+      FILE_STORAGE_PATH: /data/gateway-buffer.json
+      DEVICES: ${GATEWAY_1_DEVICES:-50}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - gateway1:/data
+
+  gateway-2:
+    <<: *gateway
+    environment:
+      ADDRESS: http://server:8080
+      GATEWAY_KEY: ${GATEWAY_2_KEY:-}
+      KEY: ${KEY:-}
+      FILE_STORAGE_PATH: /data/gateway-buffer.json
+      DEVICES: ${GATEWAY_2_DEVICES:-50}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - gateway2:/data
+
+volumes:
+  pgdata:
+  gateway1:
+  gateway2:
