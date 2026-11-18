@@ -46,6 +46,25 @@ run = "golangci-lint fmt ./..."
 description = "Run golangci-lint"
 run = "golangci-lint run ./..."
 
+[tasks.statictest]
+description = "Course static analyzer: go vet -vettool=statictest (downloads it once; rm bin/statictest to update)"
+run = '''
+set -eu
+tool="$BIN_DIR/statictest"
+if [ ! -x "$tool" ]; then
+  case "$(uname -s)-$(uname -m)" in
+    Darwin-arm64)  asset=statictest-darwin-arm64 ;;
+    Darwin-x86_64) asset=statictest-darwin-amd64 ;;
+    Linux-x86_64)  asset=statictest ;;
+    *) echo "statictest: no prebuilt binary for $(uname -s)-$(uname -m)" >&2; exit 1 ;;
+  esac
+  mkdir -p "$BIN_DIR"
+  curl -fsSL -o "$tool" "https://github.com/Yandex-Practicum/go-autotests/releases/latest/download/$asset"
+  chmod +x "$tool"
+fi
+go vet -vettool="$tool" ./...
+'''
+
 [tasks.test]
 description = "Run unit tests"
 run = "go test ./..."
@@ -67,8 +86,8 @@ run = [
 ]
 
 [tasks.check]
-description = "lint + race tests + build"
-run = [{ task = "lint" }, { task = "test-race" }, { task = "build" }]
+description = "lint + statictest + race tests + build"
+run = [{ task = "lint" }, { task = "statictest" }, { task = "test-race" }, { task = "build" }]
 
 # ---------- docker ----------
 

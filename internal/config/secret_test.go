@@ -17,7 +17,7 @@ func TestSecret_NeverPrints(t *testing.T) {
 	}
 	outputs := map[string]string{
 		"%v":   fmt.Sprintf("%v", s),
-		"%s":   fmt.Sprintf("%s", s), //nolint:staticcheck // S1025: the test is about fmt's %s verb
+		"%s":   fmt.Sprintf("key=%s", s),
 		"%#v":  fmt.Sprintf("%#v", s),
 		"%+v":  fmt.Sprintf("%+v", cfg),
 		"json": string(jsonBytes),
