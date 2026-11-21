@@ -71,3 +71,23 @@ func TestValueString(t *testing.T) {
 		t.Errorf("JSON = %s, %v; want the value as a string", b, err)
 	}
 }
+
+func TestValueJSONRoundTrip(t *testing.T) {
+	type wrap struct{ V Value }
+	for _, v := range []Value{0, 1, 123456, MaxValue} {
+		b, err := json.Marshal(wrap{v})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got wrap
+		if err := json.Unmarshal(b, &got); err != nil || got.V != v {
+			t.Errorf("round trip of %d via %s: %d, %v", int64(v), b, int64(got.V), err)
+		}
+	}
+	for _, bad := range []string{`{"V":"-1.000"}`, `{"V":"1.2345"}`, `{"V":12}`} {
+		var got wrap
+		if err := json.Unmarshal([]byte(bad), &got); err == nil {
+			t.Errorf("%s must not decode", bad)
+		}
+	}
+}

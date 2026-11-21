@@ -13,6 +13,7 @@ import (
 
 	"github.com/sergezossimov0/meters/internal/app"
 	"github.com/sergezossimov0/meters/internal/config"
+	"github.com/sergezossimov0/meters/internal/gateway"
 	"github.com/sergezossimov0/meters/internal/logger"
 )
 
@@ -26,8 +27,7 @@ func main() {
 	os.Exit(app.ExitCode("gateway", err, os.Stdout, os.Stderr))
 }
 
-// run is a skeleton until L3: it loads the config and waits for a signal.
-// The simulator, buffer and sender will run in an errgroup here.
+// run loads the config and runs the simulator until ctx is done.
 func run(ctx context.Context, args []string, lookupEnv config.LookupEnv) error {
 	cfg, err := config.LoadGateway(args, lookupEnv)
 	if err != nil {
@@ -40,7 +40,9 @@ func run(ctx context.Context, args []string, lookupEnv config.LookupEnv) error {
 	defer func() { _ = log.Sync() }()
 	log.Info("starting gateway", zap.String("version", version), zap.Stringer("config", cfg))
 
-	<-ctx.Done()
+	if err := gateway.Run(ctx, cfg, log); err != nil {
+		return err
+	}
 	log.Info("gateway stopped")
 	return nil
 }

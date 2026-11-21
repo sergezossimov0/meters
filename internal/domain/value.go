@@ -68,3 +68,15 @@ func (v Value) String() string {
 
 // MarshalText makes Value a JSON string, as the API requires (spec п. 6).
 func (v Value) MarshalText() ([]byte, error) { return []byte(v.String()), nil }
+
+// UnmarshalText reads what MarshalText writes, by the rules of ParseValue.
+// For files and answers this program wrote itself: request bodies keep the
+// value a plain string, so a bad one rejects a reading, not the batch.
+func (v *Value) UnmarshalText(b []byte) error {
+	p, err := ParseValue(string(b))
+	if err != nil {
+		return err
+	}
+	*v = p
+	return nil
+}

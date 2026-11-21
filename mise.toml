@@ -96,8 +96,10 @@ description = "Start PostgreSQL and server in Docker (gateways: COMPOSE_PROFILES
 run = "docker compose up -d --build"
 
 [tasks.down]
-description = "Stop Docker services"
-run = "docker compose down"
+description = "Stop Docker services, gateways included"
+# Profiled services are ignored unless their profile is enabled: without it
+# the gateways would keep running and hold the network.
+run = "docker compose --profile gateways down"
 
 [tasks.smoke]
 description = "Smoke test of the running stand (reads ADMIN_LOGIN, ADMIN_PASSWORD and KEY from .env)"
@@ -106,3 +108,14 @@ run = '''
 set -a; . ./.env; set +a
 scripts/smoke.sh
 '''
+
+[tasks.gateway-keys]
+description = "Register the two compose gateways and print GATEWAY_1_KEY/GATEWAY_2_KEY lines for .env"
+run = '''
+set -a; . ./.env; set +a
+scripts/gateway-keys.sh
+'''
+
+[tasks.logs]
+description = "Follow the logs of the Docker services (e.g. mise run logs gateway-1)"
+run = "docker compose logs -f --tail=50"
