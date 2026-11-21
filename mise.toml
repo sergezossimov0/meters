@@ -100,7 +100,7 @@ description = "Stop Docker services"
 run = "docker compose down"
 
 [tasks.smoke]
-description = "Smoke test of the running stand (reads ADMIN_LOGIN/ADMIN_PASSWORD from .env)"
+description = "Smoke test of the running stand (reads ADMIN_LOGIN, ADMIN_PASSWORD and KEY from .env)"
 # .env is loaded inside the task, so its values do not leak into mise's env.
 run = '''
 set -a; . ./.env; set +a

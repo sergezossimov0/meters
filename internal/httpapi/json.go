@@ -20,6 +20,17 @@ import (
 // not silently ignored. On failure it writes the error response (400, 413
 // or 415) and returns false.
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	return decodeJSONMode(w, r, dst, true)
+}
+
+// decodeGatewayJSON is decodeJSON that ignores unknown fields: a newer
+// gateway may send fields an older server does not know (spec п. 6.1).
+// Trailing data is still an error.
+func decodeGatewayJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	return decodeJSONMode(w, r, dst, false)
+}
+
+func decodeJSONMode(w http.ResponseWriter, r *http.Request, dst any, strict bool) bool {
 	if ct := r.Header.Get("Content-Type"); ct != "" {
 		if mt, _, err := mime.ParseMediaType(ct); err != nil || mt != "application/json" {
 			middleware.WriteError(w, http.StatusUnsupportedMediaType, "Content-Type must be application/json")
@@ -27,7 +38,9 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 		}
 	}
 	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
+	if strict {
+		dec.DisallowUnknownFields()
+	}
 	if err := dec.Decode(dst); err != nil {
 		writeDecodeError(w, err)
 		return false

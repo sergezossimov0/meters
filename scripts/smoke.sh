@@ -1,21 +1,29 @@
 #!/usr/bin/env bash
-# Smoke test of a running stand (L1): admin login, customer registration,
-# role checks, meter type catalogue. Exits non-zero on the first failure.
+# Smoke test of a running stand: admin login, customer registration, role
+# checks, meter type catalogue (L1); gateways and batches of readings (L2).
+# Exits non-zero on the first failure.
 #
-#   set -a; . ./.env; set +a        # ADMIN_LOGIN, ADMIN_PASSWORD
+#   set -a; . ./.env; set +a        # ADMIN_LOGIN, ADMIN_PASSWORD, KEY
 #   scripts/smoke.sh                # BASE_URL defaults to http://localhost:8080
 #
-# Needs curl, jq and openssl. Passwords and tokens never appear on a command
-# line (they would be visible in ps): request bodies and the Authorization
-# header go through files in a private temp directory, and jq reads the
-# passwords from the environment. Each run registers a new customer (random
-# password) and adds one subtype (smoke_<time>) to "gas" in the stand's DB.
+# KEY must be the server's HashSHA256 key; empty means the server runs
+# without signing, and the signature checks are skipped.
+#
+# Needs curl, jq, openssl and python3 (HMAC with the key taken from the
+# environment). Passwords, tokens and keys never appear on a command line
+# (they would be visible in ps): request bodies and the Authorization and
+# X-Gateway-Key headers go through files in a private temp directory; jq
+# and python3 read secrets from the environment. Each run registers a new
+# customer (random password), adds one subtype (smoke_<time>) to "gas",
+# creates a gateway smoke-<time> and a pending device SMOKE-<time>.
 set -euo pipefail
 
 BASE_URL=${BASE_URL:-http://localhost:8080}
 : "${ADMIN_LOGIN:?set ADMIN_LOGIN (e.g. set -a; . ./.env; set +a)}"
 : "${ADMIN_PASSWORD:?set ADMIN_PASSWORD}"
 export ADMIN_LOGIN ADMIN_PASSWORD
+KEY=${KEY:-}
+export KEY
 
 umask 077
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/smoke.XXXXXX")
@@ -114,5 +122,106 @@ if jq -e --arg code "$SUBTYPE_CODE" '.[] | select(.code == "gas") | .subtypes[] 
 else
 	fail "new subtype is not in the catalogue"
 fi
+
+# --- L2: gateways and readings ---------------------------------------------
+
+# sign FILE — hex HMAC-SHA256 of the file with $KEY (read from the environment).
+sign() {
+	python3 -I -c 'import hashlib, hmac, os, sys
+print(hmac.new(os.environb[b"KEY"], sys.stdin.buffer.read(), hashlib.sha256).hexdigest())' <"$1"
+}
+
+# gw_send MODE — POSTs $tmp/batch to /gateway/v1/readings as the smoke
+# gateway. MODE: ok, nokey (no X-Gateway-Key), badsig (wrong signature).
+# Leaves the status in $code, the body in $tmp/body, headers in $tmp/headers.
+gw_send() {
+	local mode=$1
+	local args=(-sS -o "$tmp/body" -D "$tmp/headers" -w '%{http_code}' -X POST
+		-H 'Content-Type: application/json' --data-binary "@$tmp/batch")
+	if [ "$mode" != nokey ]; then args+=(-H "@$tmp/gwkey"); fi
+	if [ -n "$KEY" ]; then
+		if [ "$mode" = badsig ]; then
+			args+=(-H "HashSHA256: $(printf '%064d' 0)")
+		else
+			args+=(-H "HashSHA256: $(sign "$tmp/batch")")
+		fi
+	fi
+	code=$(curl "${args[@]}" "$BASE_URL/gateway/v1/readings")
+}
+
+# signed — the answer carries a valid HashSHA256 (skipped without KEY).
+signed() {
+	[ -n "$KEY" ] || return 0
+	local got
+	got=$(awk 'tolower($1) == "hashsha256:" { print $2 }' "$tmp/headers" | tr -d '\r')
+	if [ -n "$got" ] && [ "$got" = "$(sign "$tmp/body")" ]; then ok "answer is signed"; else fail "answer signature: got '$got'"; fi
+}
+
+# batch ID — one new device with its state and one reading an hour ago.
+batch() {
+	jq -n --arg id "$1" --arg serial "SMOKE-$run_id" '{
+		batch_id: $id,
+		items: [{device_serial: $serial, model: "Smoke-1",
+			device_status: {battery_pct: 90, rssi: -100, error_codes: []},
+			readings: [{measured_at: (now - 3600 | floor | todate), value: "1.000"}]}]
+	}' >"$tmp/batch"
+}
+
+jq -n --arg name "smoke-$run_id" '{name: $name}' >"$tmp/req"
+call POST /api/admin/gateways "$customer"
+expect 403 "customer creates a gateway"
+
+jq -n --arg name "smoke-$run_id" '{name: $name}' >"$tmp/req"
+call POST /api/admin/gateways "$admin"
+expect 201 "admin creates gateway smoke-$run_id"
+gw_id=$(jq -er '.id' "$tmp/body") || fail "no id in the response"
+jq -er '"X-Gateway-Key: " + .key' "$tmp/body" >"$tmp/gwkey" || fail "no key in the response"
+
+call GET /api/admin/gateways "$admin"
+expect 200 "GET /api/admin/gateways"
+if jq -e --argjson id "$gw_id" 'any(.[]; .id == $id) and all(.[]; has("key") | not)' "$tmp/body" >/dev/null; then
+	ok "gateway is listed, no keys in the list"
+else
+	fail "gateway $gw_id is not listed or a key is shown"
+fi
+
+batch "smoke-$run_id-1"
+gw_send ok
+expect 200 "batch with a new device"
+signed
+if jq -e --arg serial "SMOKE-$run_id" '.accepted == 0 and .rejected == [{device_serial: $serial, index: 0, reason: "device_not_active"}]' "$tmp/body" >/dev/null; then
+	ok "new device is pending: device_not_active"
+else
+	fail "unexpected answer for a new device"
+fi
+cp "$tmp/body" "$tmp/first"
+
+gw_send ok
+expect 200 "the same batch_id again"
+if cmp -s "$tmp/first" "$tmp/body"; then ok "repeat returns the same answer"; else fail "repeat answered differently"; fi
+
+gw_send nokey
+expect 401 "batch without X-Gateway-Key"
+signed
+
+if [ -n "$KEY" ]; then
+	gw_send badsig
+	expect 400 "batch with a wrong HashSHA256"
+	signed
+else
+	echo "  skip signature checks: KEY is not set"
+fi
+
+call POST "/api/admin/gateways/$gw_id/block" "$admin"
+expect 200 "block the gateway"
+batch "smoke-$run_id-2"
+gw_send ok
+expect 403 "batch from a blocked gateway"
+signed
+
+call POST "/api/admin/gateways/$gw_id/unblock" "$admin"
+expect 200 "unblock the gateway"
+gw_send ok
+expect 200 "batch after unblocking"
 
 echo "all $pass checks passed"

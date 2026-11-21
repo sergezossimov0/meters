@@ -32,3 +32,33 @@ type MeterTypeRepository interface {
 	// type gives domain.ErrNotFound, a taken subtype code domain.ErrConflict.
 	CreateSubtype(ctx context.Context, typeCode string, s domain.MeterSubtype) (domain.MeterSubtype, error)
 }
+
+// GatewayRepository keeps gateways. The API key itself is never passed here,
+// only its sha256.
+type GatewayRepository interface {
+	// Create stores g with keyHash and returns it with ID and CreatedAt set.
+	// A taken keyHash gives domain.ErrConflict.
+	Create(ctx context.Context, g domain.Gateway, keyHash []byte) (domain.Gateway, error)
+	// List returns all gateways ordered by ID; none is an empty, non-nil slice.
+	List(ctx context.Context) ([]domain.Gateway, error)
+	// ByKeyHash finds the gateway whose key has this sha256.
+	ByKeyHash(ctx context.Context, keyHash []byte) (domain.Gateway, error)
+	// SetBlocked sets the flag and returns the gateway; setting the current
+	// value again is not an error. An unknown id gives domain.ErrNotFound.
+	SetBlocked(ctx context.Context, id int64, blocked bool) (domain.Gateway, error)
+}
+
+// ReadingRepository stores readings from gateways.
+type ReadingRepository interface {
+	// IngestBatch processes a checked batch from the gateway atomically
+	// (spec п. 6.1, 10.3):
+	//   - a batch_id already processed for this gateway returns the stored
+	//     result with replayed = true and changes nothing;
+	//   - unknown serials become pending devices with the model from b;
+	//   - readings of non-active devices are rejected (domain.DeviceRejection);
+	//   - readings of active devices go through domain.Classify: duplicates
+	//     are counted, the rest stored with the decrease flag.
+	// rejected are the rejections found while checking b; they become part of
+	// the stored result so a replay answers exactly the same.
+	IngestBatch(ctx context.Context, gatewayID int64, b domain.Batch, rejected []domain.Rejected) (res domain.BatchResult, replayed bool, err error)
+}

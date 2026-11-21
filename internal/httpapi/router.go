@@ -40,11 +40,13 @@ type Deps struct {
 	Users        UserService
 	Tokens       middleware.TokenParser
 	MeterTypes   MeterTypeService
+	Gateways     GatewayService
+	SignKey      []byte // HashSHA256 key for /gateway/v1; empty disables signing
+	Ingest       IngestService
 }
 
 // NewRouter builds the server's handler. Middleware order: logging sees the
 // final status and the compressed size; compression wraps everything below.
-// The /gateway/v1 group is added in L2.
 func NewRouter(d Deps) http.Handler {
 	r := chi.NewRouter()
 	r.Use(logger.HTTP(d.Log), middleware.Compress, middleware.Decompress(d.MaxBodyBytes))
@@ -72,8 +74,27 @@ func NewRouter(d Deps) http.Handler {
 
 			r.With(middleware.RequireRole(domain.RoleAdmin)).Route("/admin", func(r chi.Router) {
 				r.Post("/meter-types", createMeterType(d.Log, d.MeterTypes))
+
+				r.Get("/gateways", listGateways(d.Log, d.Gateways))
+				r.Post("/gateways", createGateway(d.Log, d.Gateways))
+				r.Post("/gateways/{id}/block", setGatewayBlocked(d.Log, d.Gateways, true))
+				r.Post("/gateways/{id}/unblock", setGatewayBlocked(d.Log, d.Gateways, false))
 			})
 		})
+	})
+
+	// Gateways: X-Gateway-Key and HashSHA256 instead of JWT. Order (spec
+	// п. 6.1): the response signature is the outer layer, so 401/403/400 are
+	// signed too; the key is checked before the body is read and hashed.
+	// Attached with With at the mount point for the same reason as RequireRole:
+	// an unknown path below still needs the key and gets a signed answer.
+	r.With(
+		middleware.SignResponse(d.SignKey),
+		middleware.GatewayAuth(d.Gateways, d.Log),
+		middleware.VerifyRequest(d.SignKey),
+	).Route("/gateway/v1", func(r chi.Router) {
+		r.Post("/readings", ingestReadings(d.Log, d.Ingest))
+		// POST /heartbeat — L4.
 	})
 	return r
 }

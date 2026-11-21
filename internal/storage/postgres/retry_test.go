@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -23,8 +25,13 @@ func TestIsRetryable(t *testing.T) {
 	}{
 		{"nil", nil, false},
 		{"connection failure 08006", &pgconn.PgError{Code: pgerrcode.ConnectionFailure}, true},
-		{"cannot connect now 57P03 is not class 08", &pgconn.PgError{Code: pgerrcode.CannotConnectNow}, false},
-		{"admin shutdown 57P01 is not class 08", &pgconn.PgError{Code: pgerrcode.AdminShutdown}, false},
+		{"cannot connect now 57P03", &pgconn.PgError{Code: pgerrcode.CannotConnectNow}, true},
+		{"admin shutdown 57P01 (pg_terminate_backend)", &pgconn.PgError{Code: pgerrcode.AdminShutdown}, true},
+		{"crash shutdown 57P02", &pgconn.PgError{Code: pgerrcode.CrashShutdown}, true},
+		{"query canceled 57014", &pgconn.PgError{Code: pgerrcode.QueryCanceled}, false},
+		{"connection broke mid-query", fmt.Errorf("lock devices: %w", io.ErrUnexpectedEOF), true},
+		{"server closed the connection", fmt.Errorf("read: %w", io.EOF), true},
+		{"network error", &net.OpError{Op: "read", Net: "tcp", Err: errors.New("connection reset by peer")}, true},
 		{"connection exception 08000 wrapped", fmt.Errorf("insert user: %w", &pgconn.PgError{Code: pgerrcode.ConnectionException}), true},
 		{"unique violation", &pgconn.PgError{Code: pgerrcode.UniqueViolation}, false},
 		{"syntax error", &pgconn.PgError{Code: pgerrcode.SyntaxError}, false},

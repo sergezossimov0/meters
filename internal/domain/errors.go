@@ -15,6 +15,8 @@ var (
 	ErrConflict = errors.New("already exists")
 	// ErrInvalid: the input breaks a rule; the error text says which.
 	ErrInvalid = errors.New("invalid input")
+	// ErrGatewayBlocked: the gateway key is valid, but the admin blocked it.
+	ErrGatewayBlocked = errors.New("gateway is blocked")
 )
 
 // InvalidError explains why the input was rejected. Its message is safe to

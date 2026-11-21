@@ -51,6 +51,7 @@ func newAPI(t *testing.T) apiEnv {
 		Users:        service.NewUsers(memory.NewUsers(), passwords, tokens),
 		Tokens:       tokens,
 		MeterTypes:   service.NewMeterTypes(memory.NewMeterTypes()),
+		Gateways:     service.NewGateways(memory.NewGateways()),
 	})
 	return apiEnv{h: h, logs: logs, tokens: tokens}
 }

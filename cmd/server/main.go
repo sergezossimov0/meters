@@ -87,6 +87,9 @@ func run(ctx context.Context, args []string, lookupEnv config.LookupEnv) error {
 		Users:        users,
 		Tokens:       tokens,
 		MeterTypes:   service.NewMeterTypes(postgres.NewMeterTypes(pool, log)),
+		Gateways:     service.NewGateways(postgres.NewGateways(pool, log)),
+		SignKey:      []byte(cfg.Key.Value()),
+		Ingest:       service.NewIngest(postgres.NewReadings(pool, log)),
 	}))
 
 	g, gctx := errgroup.WithContext(ctx)
