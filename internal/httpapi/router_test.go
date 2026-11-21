@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/sergezossimov0/meters/internal/domain"
 )
 
 type pingerFunc func(ctx context.Context) error
@@ -135,5 +137,56 @@ func TestNotFoundAndMethodNotAllowed(t *testing.T) {
 	}
 	if allow := rec.Header().Get("Allow"); allow != "GET" {
 		t.Errorf("Allow = %q, want GET", allow)
+	}
+}
+
+// TestAPI_AdminGroup checks the router wiring: /api/admin/* needs a token and
+// the admin role before routing, so an unknown admin path is 401/403, not 404.
+func TestAPI_AdminGroup(t *testing.T) {
+	e := newAPI(t)
+	get := func(authorization string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/api/admin/anything", nil)
+		if authorization != "" {
+			req.Header.Set("Authorization", authorization)
+		}
+		rec := httptest.NewRecorder()
+		e.h.ServeHTTP(rec, req)
+		return rec
+	}
+	bearer := func(id int64, role domain.Role) string {
+		token, err := e.tokens.Issue(id, role)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return "Bearer " + token
+	}
+
+	tests := []struct {
+		name          string
+		authorization string
+		want          int
+	}{
+		{"anonymous", "", http.StatusUnauthorized},
+		{"bad token", "Bearer x.y.z", http.StatusUnauthorized},
+		{"customer", bearer(2, domain.RoleCustomer), http.StatusForbidden},
+		{"admin", bearer(1, domain.RoleAdmin), http.StatusNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := get(tt.authorization)
+			if rec.Code != tt.want {
+				t.Errorf("status = %d, want %d (body %s)", rec.Code, tt.want, rec.Body)
+			}
+			if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+				t.Errorf("Content-Type = %q, want JSON error", ct)
+			}
+		})
+	}
+
+	// Public routes stay public.
+	if rec := e.post("/api/user/login", creds(testLogin, testPw)); rec.Code != http.StatusUnauthorized {
+		t.Errorf("login without token: status = %d, want 401 from the handler", rec.Code)
+	} else if rec.Header().Get("WWW-Authenticate") != "" {
+		t.Error("login must not be behind Authenticate")
 	}
 }

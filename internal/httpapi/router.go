@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
+	"github.com/sergezossimov0/meters/internal/domain"
 	"github.com/sergezossimov0/meters/internal/httpapi/middleware"
 	"github.com/sergezossimov0/meters/internal/logger"
 )
@@ -36,11 +37,14 @@ type Deps struct {
 	DB           Pinger
 	MaxBodyBytes int64
 	Version      string
+	Users        UserService
+	Tokens       middleware.TokenParser
+	MeterTypes   MeterTypeService
 }
 
 // NewRouter builds the server's handler. Middleware order: logging sees the
 // final status and the compressed size; compression wraps everything below.
-// The /gateway/v1 and /api groups are added in L2 and later.
+// The /gateway/v1 group is added in L2.
 func NewRouter(d Deps) http.Handler {
 	r := chi.NewRouter()
 	r.Use(logger.HTTP(d.Log), middleware.Compress, middleware.Decompress(d.MaxBodyBytes))
@@ -52,6 +56,25 @@ func NewRouter(d Deps) http.Handler {
 
 	r.Get("/ping", ping(d.Log, d.DB))
 	r.Get("/", index(d.Log, d.Version))
+
+	r.Route("/api", func(r chi.Router) {
+		r.Post("/user/register", register(d.Log, d.Users))
+		r.Post("/user/login", login(d.Log, d.Users))
+
+		// Everything below needs a valid token. /api/admin is mounted even
+		// while empty, so an unknown admin path answers 401/403, not 404.
+		// RequireRole is attached at the mount point (With), not inside the
+		// subrouter (Use): chi skips a subrouter's middlewares when no route
+		// in it matches, which would turn 403 into 404.
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.Authenticate(d.Tokens, d.Log))
+			r.Get("/meter-types", listMeterTypes(d.Log, d.MeterTypes))
+
+			r.With(middleware.RequireRole(domain.RoleAdmin)).Route("/admin", func(r chi.Router) {
+				r.Post("/meter-types", createMeterType(d.Log, d.MeterTypes))
+			})
+		})
+	})
 	return r
 }
 
