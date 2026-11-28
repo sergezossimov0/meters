@@ -1,0 +1,15 @@
+# Keep the build context small and free of local state and secrets.
+.git
+.claude
+_doc
+bin
+tmp
+.env
+.env.*
+mise.local.toml
+coverage.*
+*.test
+gateway-buffer*.json
+.DS_Store
+.idea
+.vscode

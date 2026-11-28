@@ -1,0 +1,27 @@
+# Local working docs (spec, plan, course materials): not published
+/_doc/
+
+# Build and test artifacts
+/bin/
+/tmp/
+coverage.out
+coverage.html
+*.test
+
+# Gateway simulator buffer (FILE_STORAGE_PATH)
+gateway-buffer*.json
+
+# Secrets: never commit. Templates live in .env.example.
+.env
+.env.*
+!.env.example
+mise.local.toml
+
+# Claude Code local state
+.claude/settings.local.json
+.claude/.cc-writes/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
